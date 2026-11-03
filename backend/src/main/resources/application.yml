@@ -1,0 +1,34 @@
+server:
+  port: 8080
+  shutdown: graceful
+
+spring:
+  application:
+    name: qinghe-backend
+  datasource:
+    # SQLite 单文件数据库：dev 阶段零安装，后续通过 profile 切到 PostgreSQL
+    url: jdbc:sqlite:./data/app.db
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      # SQLite 写操作是串行的，连接池开大反而更容易 SQLITE_BUSY
+      maximum-pool-size: 1
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.community.dialect.SQLiteDialect
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    root: INFO

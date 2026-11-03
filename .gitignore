@@ -1,0 +1,32 @@
+# 依赖与构建产物
+node_modules/
+dist/
+target/
+*.class
+
+# 日志
+*.log
+logs/
+
+# 本地环境变量（含密钥，绝不提交）
+.env.local
+.env.*.local
+*.local
+
+# SQLite 数据库文件
+backend/data/*.db
+backend/data/*.db-journal
+backend/data/*.db-wal
+backend/data/*.db-shm
+!backend/data/.gitkeep
+
+# IDE / 系统
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# 测试与覆盖率
+coverage/
+.nyc_output/
