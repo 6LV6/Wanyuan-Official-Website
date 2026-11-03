@@ -1,4 +1,6 @@
-import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
+import axios, { AxiosError, type AxiosRequestConfig, type InternalAxiosRequestConfig } from 'axios'
+
+import { getAccessToken, setAccessToken } from './token'
 
 /** 与后端 com.sixlv6.backend.common.ApiResponse 一一对应 */
 export interface ApiResponse<T> {
@@ -20,20 +22,68 @@ export class ApiError extends Error {
   }
 }
 
+interface RetryConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean
+}
+
+const baseURL = import.meta.env.VITE_API_BASE_URL
+
 const http = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL,
+  baseURL,
   timeout: 10_000,
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 })
 
+/** 不带拦截器的裸实例，专用于刷新令牌，避免 401 → 刷新 → 401 的死循环 */
+const raw = axios.create({ baseURL, timeout: 10_000, withCredentials: true })
+
 http.interceptors.request.use((config) => {
-  // M2 会在这里注入 Authorization: Bearer <token>
-  const token = localStorage.getItem('access_token')
+  const token = getAccessToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
   return config
 })
+
+let refreshing: Promise<string | null> | null = null
+
+/**
+ * 单飞（single-flight）：并发多个 401 时只发一次刷新请求。
+ * 多个请求共享同一个 Promise，刷新完成后各自重放原请求。
+ */
+export function refreshAccessToken(): Promise<string | null> {
+  if (!refreshing) {
+    refreshing = raw
+      .post<ApiResponse<{ accessToken: { token: string } }>>('/auth/refresh')
+      .then((response) => {
+        const token = response.data.data.accessToken.token
+        setAccessToken(token)
+        return token
+      })
+      .catch(() => {
+        setAccessToken(null)
+        return null
+      })
+      .finally(() => {
+        refreshing = null
+      })
+  }
+  return refreshing
+}
+
+type AuthExpiredHandler = () => void
+const authExpiredHandlers = new Set<AuthExpiredHandler>()
+
+/** 刷新失败 = 登录态彻底失效，交给上层跳转登录页 */
+export function onAuthExpired(handler: AuthExpiredHandler): () => void {
+  authExpiredHandlers.add(handler)
+  return () => authExpiredHandlers.delete(handler)
+}
+
+function isAuthEndpoint(url?: string): boolean {
+  return !!url && ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout'].some((p) => url.includes(p))
+}
 
 http.interceptors.response.use(
   (response) => {
@@ -46,7 +96,20 @@ http.interceptors.response.use(
     }
     return response.data
   },
-  (error: AxiosError<ApiResponse<unknown>>) => {
+  async (error: AxiosError<ApiResponse<unknown>>) => {
+    const config = error.config as RetryConfig | undefined
+
+    // Access Token 过期：静默刷新后重放一次
+    if (error.response?.status === 401 && config && !config._retry && !isAuthEndpoint(config.url)) {
+      config._retry = true
+      const token = await refreshAccessToken()
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`
+        return http.request(config)
+      }
+      authExpiredHandlers.forEach((handler) => handler())
+    }
+
     const body = error.response?.data
     if (body && typeof body === 'object' && 'message' in body) {
       return Promise.reject(new ApiError(body.code, body.message, error.response?.status))

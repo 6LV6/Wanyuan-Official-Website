@@ -1,18 +1,28 @@
 package com.sixlv6.backend.config;
 
+import tools.jackson.databind.ObjectMapper;
+import com.sixlv6.backend.auth.JwtAuthenticationFilter;
+import com.sixlv6.backend.common.ApiResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -32,7 +42,9 @@ public class SecurityConfig {
     private List<String> allowedOrigins;
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                            JwtAuthenticationFilter jwtAuthenticationFilter,
+                                            ObjectMapper objectMapper) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
@@ -41,11 +53,28 @@ public class SecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/health", "/api/auth/**").permitAll()
+                        .requestMatchers("/api/health").permitAll()
+                        .requestMatchers("/api/auth/register", "/api/auth/login",
+                                "/api/auth/refresh", "/api/auth/logout").permitAll()
                         .requestMatchers("/actuator/health").permitAll()
                         .anyRequest().authenticated()
-                );
+                )
+                .exceptionHandling(handling -> handling
+                        .authenticationEntryPoint((request, response, ex) ->
+                                writeError(response, objectMapper, HttpServletResponse.SC_UNAUTHORIZED,
+                                        40100, "请先登录"))
+                        .accessDeniedHandler((request, response, ex) ->
+                                writeError(response, objectMapper, HttpServletResponse.SC_FORBIDDEN,
+                                        40300, "没有权限执行该操作"))
+                )
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
+    }
+
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        // 成本因子 10 是默认值：约 50-100ms 一次，能有效拖慢暴力破解
+        return new BCryptPasswordEncoder(10);
     }
 
     @Bean
@@ -60,5 +89,13 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/api/**", config);
         return source;
+    }
+
+    private static void writeError(HttpServletResponse response, ObjectMapper objectMapper,
+                                   int status, int code, String message) throws IOException {
+        response.setStatus(status);
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        objectMapper.writeValue(response.getWriter(), ApiResponse.error(code, message));
     }
 }

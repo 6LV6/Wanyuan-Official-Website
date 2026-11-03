@@ -47,4 +47,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ApiResponse.error(50000, "服务器开小差了，请稍后再试"));
     }
+
+    /** 请求体不是合法 JSON / 类型不匹配 */
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnreadable(Exception ex) {
+        log.warn("请求体解析失败: {}", ex.getMessage());
+        return ResponseEntity.badRequest().body(ApiResponse.error(40003, "请求格式不正确"));
+    }
+
+    /** 唯一约束冲突（并发注册同名用户时可能绕过先查后插） */
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConflict(Exception ex) {
+        log.warn("数据唯一性冲突: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(40900, "数据已存在，请勿重复提交"));
+    }
 }

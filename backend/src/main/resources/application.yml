@@ -20,6 +20,19 @@ spring:
       hibernate:
         dialect: org.hibernate.community.dialect.SQLiteDialect
 
+app:
+  jwt:
+    # 生产环境必须用环境变量覆盖。HS256 要求密钥至少 32 字节
+    secret: ${JWT_SECRET:dev-only-secret-change-me-please-32bytes-min}
+    access-ttl: 15m
+    refresh-ttl: 7d
+  cookie:
+    # 本地是 http，生产（https）要设成 true
+    secure: ${COOKIE_SECURE:false}
+    same-site: Lax
+  cors:
+    allowed-origins: http://localhost:5173
+
 management:
   endpoints:
     web:
